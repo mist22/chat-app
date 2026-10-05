@@ -5,6 +5,15 @@ import express, { json } from "express"
 import {Pool} from "pg"
 import { Resend } from "resend";
 import cors from "cors"
+import bcrypt from "bcrypt"
+
+let app = express()
+
+app.use(cors({
+    origin: "http://localhost:5173",
+    methods: ["GET", 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ["Content-Type", "Authorization"]
+}))
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -23,11 +32,7 @@ pool.connect((error, release, client) => {
 
 })
 
-let app = express()
 
-app.use(cors({
-    origin: "http://localhost:5173"
-}))
 
 app.use(express.json());
 
@@ -55,7 +60,32 @@ app.post('/send_invite', async (req, res) => {
     return res.status(200).json({messgae: "email sent succefuly"})
 
 })
+app.post("/signup", async(req, res) => {
+    const {name, number, email, password} = req.body
+    console.log(name, number, email, password)
+    const client = await pool.connect()
+    const salt = 12
+    const password_hash = await bcrypt.hash(password, salt)
+    try{
+        const check = await client.query("SELECT *FROM users  WHERE number =$1",[number])
+        if(check.rows.length > 0){
+            return res.status(403).json({message: "user already exist"})
+        }
 
+        const result = await client.query(`
+            INSERT INTO users (username, email , password_hash, number) VALUES ($1, $2, $3)
+            RETURNING *`,[name, email,  password_hash, number])
+        await client.query("COMMIT")
+        if (result.rows.length > 0) {
+            return res.status(200).json({data: result.rows[0], message: "succesfully signed up"})
+        }
+    }catch(err){
+        await client.query("ROLLBACK")
+        return res.status(403).json({error: "Signup not succefully"})
+    }finally{
+        client.release()
+    }
+})
 app.listen(PORT , () => {
     console.log("server runnning at port", PORT)
 })
